@@ -154,6 +154,21 @@ cd release
 2. 使用 `h264_nvenc` 而不是 `hevc_nvenc`
 3. 减少 `max_slice` 值（切片更短）
 
+## 版权与免责声明
+
+### 版权提醒
+- 请仅使用自有 / 授权的视频 / 音频文件，避免侵权
+- 工具本身用 MIT 协议发布，但用户需自行确保使用的素材合法
+
+### FFmpeg 协议
+- FFmpeg 基于 LGPL/GPL 协议
+- 若内置 FFmpeg 二进制文件，需在发布包中附带 FFmpeg 的开源声明和源码链接
+- FFmpeg 官方源码：https://ffmpeg.org/download.html
+
+### 免责声明
+- 工具免费使用，不承担因使用本工具导致的版权纠纷、数据丢失等责任
+- 使用本工具即表示您同意自行承担所有风险
+
 ## 许可证
 
 MIT License
