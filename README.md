@@ -7,10 +7,14 @@
 - 🎵 自动识别MP3文件并进行视频混剪
 - 🎬 支持随机视频切片（可配置时长范围）
 - 🔄 支持视频转场效果
-- 🎨 GPU加速编码（NVIDIA NVENC）
+- 🎨 GPU加速编码（NVIDIA NVENC 、 intel iHD Graphics）
 - ⚙️ 完全通过配置文件控制
 - 🚀 批量处理多个MP3文件
 
+## 界面
+
+- 界面截图
+![GUI](file/1.png)
 ## 环境要求
 
 - Python 3.11+（可选）
