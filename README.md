@@ -1,6 +1,6 @@
 # 视频快速混剪工具
 
-一个基于FFmpeg的视频快速混剪工具，可以自动将视频切片并合成到MP3音频中。
+一个基于FFmpeg的视频快速混剪工具，，可以自动将视频切片并合成到MP3音频中。用于快速生成卡点视频、混剪视频。
 
 ## 功能特点
 
@@ -13,11 +13,22 @@
 
 ## 环境要求
 
-- Python 3.11+
-- NVIDIA GPU（支持CUDA和NVENC编码器）
-- FFmpeg（已包含在release包中）
+- Python 3.11+（可选）
+- FFmpeg
 
 ## 使用方法
+
+### 重要
+
+- 确保 FFmpeg 已正确安装并添加到环境变量中。
+- 配置文件 `config.ini` 中的参数需要根据实际情况调整。
+- 确保 `music/` 目录下有MP3文件，`video/` 目录下有视频文件。
+- 确保 `cache/` 目录下有缓存目录（自动生成）。
+- 请自行下载最新的ffmpeg放置在bin目录下。
+- 如果已经安装了python环境，可以直接运行run_gui.bat文件。会比直接运行makevideo_full.exe快一些。
+- 如果没有安装python环境，可以运行makevideo_gui.exe文件，进行设置。
+- 也可以用任意文本编辑器修改config.ini文件，进行自定义配置。
+- makevideo.exe 是一个简单的命令行工具，会按照默认配置，全自动生成。
 
 ### 1. 准备文件结构
 
@@ -118,7 +129,7 @@ cd release
 
 1. 确保 `video/` 目录中有足够的视频文件（建议至少100个以上）
 2. 视频格式支持 MP4, MKV, AVI 等常见格式
-3. GPU必须支持NVENC编码器（GTX 900系列及以上）
+3. ffmpeg版本必须支持NVENC（>=4.3.0）。
 4. 如果遇到性能问题，可以降低 `quality` 值或使用 `h264_nvenc`
 
 ## 故障排除
@@ -131,6 +142,7 @@ cd release
 1. NVIDIA驱动是否最新
 2. GPU是否支持NVENC
 3. `config.ini` 中的编码器设置是否正确
+4. 可以尝试切换indel集显或仅用cpu进行压制。
 
 ### 处理速度慢
 尝试：
