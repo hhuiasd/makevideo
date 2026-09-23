@@ -1,5 +1,4 @@
 import os
-import shutil
 from utils import CACHE_DIR, OUTPUT_DIR, get_logger
 
 def cleanup_cache():
@@ -40,17 +39,6 @@ def cleanup_specific_files(files):
     logger.info(f"清理了 {cleaned_count} 个临时文件")
     return cleaned_count
 
-def get_output_files():
-    if not os.path.exists(OUTPUT_DIR):
-        return []
-    
-    output_files = []
-    for filename in os.listdir(OUTPUT_DIR):
-        if filename.lower().endswith('.mp4'):
-            output_files.append(filename)
-    
-    return output_files
-
 def report_completion(output_files, mp3_files):
     print("\n" + "="*50)
     print("处理完成报告")
@@ -79,13 +67,3 @@ def report_error(error_message):
     print("="*50)
     print(f"\n错误信息: {error_message}")
     print("="*50 + "\n")
-
-def report_progress(step, total_steps, message):
-    progress = (step / total_steps) * 100
-    bar_length = 40
-    filled_length = int(bar_length * step / total_steps)
-    bar = '█' * filled_length + '-' * (bar_length - filled_length)
-    print(f"\r[{bar}] {progress:.1f}% - {message}", end='', flush=True)
-    
-    if step == total_steps:
-        print()

@@ -4,11 +4,10 @@ import traceback
 import multiprocessing
 import argparse
 import configparser
-from utils import ensure_directories, MUSIC_DIR, VIDEO_DIR, CACHE_DIR, OUTPUT_DIR, LOG_DIR, FFMPEG_PATH, FFPROBE_PATH, detect_gpu_acceleration, get_logger, setup_logger, set_encoder_config, encoder_config, set_cache_type
+from utils import ensure_directories, MUSIC_DIR, OUTPUT_DIR, FFMPEG_PATH, FFPROBE_PATH, detect_gpu_acceleration, get_logger, setup_logger, set_encoder_config, get_video_encoder, encoder_config, set_cache_type
 import audio_processor
 import video_processor
 import merger
-import finalizer
 import cleanup
 
 # 读取配置文件
@@ -45,7 +44,7 @@ def process_single_mp3(mp3_file, skip_start, skip_end, min_slice, max_slice,
                       encoder, preset, quality, resolution, gop, 
                       sharpen=True, sharpen_params='5:5:0.8', 
                       transition=True, transition_duration=0.6):
-    """处理单个MP3文件的函数"""
+    """处理单个MP3文件的函数（一步编码：切片→合并转场→音频→编码→输出）"""
     logger = get_logger()
     try:
         logger.info(f"处理音乐: {mp3_file}")
@@ -73,37 +72,31 @@ def process_single_mp3(mp3_file, skip_start, skip_end, min_slice, max_slice,
             cleanup.cleanup_specific_files(slices)
             return False, mp3_file
         
-        temp_output = os.path.join(CACHE_DIR, f"temp_{os.path.splitext(mp3_file)[0]}_{os.getpid()}.mp4")
+        # 设置编码配置并获取编码器参数
+        set_encoder_config(encoder, preset, quality, resolution, gop)
+        enc, enc_params = get_video_encoder()
         
-        logger.info("步骤2: 合并视频并添加转场...")
-        if not merger.merge_videos_with_transitions(slices, temp_output, 
-                                                  transition=transition, 
-                                                  transition_duration=transition_duration,
-                                                  resolution=resolution):
-            logger.error("合并视频失败")
-            cleanup.cleanup_specific_files(slices)
-            if os.path.exists(temp_output):
-                os.remove(temp_output)
-            return False, mp3_file
-        
+        mp3_path = os.path.join(MUSIC_DIR, mp3_file)
         output_name = f"{os.path.splitext(mp3_file)[0]}.mp4"
-        output_path = os.path.join('output', output_name)
+        output_path = os.path.join(OUTPUT_DIR, output_name)
         
-        logger.info("步骤3: 最终处理（添加背景音乐并编码）...")
-        if finalizer.finalize_video(temp_output, mp3_file, output_path, 
-                                   encoder=encoder, preset=preset, quality=quality, 
-                                   resolution=resolution, gop=gop, 
-                                   sharpen=sharpen, sharpen_params=sharpen_params):
+        logger.info("步骤2: 合并转场 + 音频 + 编码（一步完成，无二次压缩）...")
+        if merger.merge_all_in_one(
+            slices, mp3_path, mp3_duration, output_path,
+            transition=transition,
+            transition_duration=transition_duration,
+            resolution=resolution,
+            sharpen=sharpen,
+            sharpen_params=sharpen_params,
+            encoder=enc,
+            encoder_params=enc_params
+        ):
             logger.info(f"成功生成: {output_path}")
             cleanup.cleanup_specific_files(slices)
-            if os.path.exists(temp_output):
-                os.remove(temp_output)
             return True, mp3_file
         else:
-            logger.error(f"最终处理失败: {mp3_file}")
+            logger.error(f"合并编码失败: {mp3_file}")
             cleanup.cleanup_specific_files(slices)
-            if os.path.exists(temp_output):
-                os.remove(temp_output)
             return False, mp3_file
             
     except Exception as e:
@@ -211,7 +204,6 @@ def main(args=None):
     logger = get_logger()
     
     # 检查是否是子进程，如果是子进程，直接返回，不执行主逻辑
-    import sys
     is_child_process = any('--multiprocessing' in arg for arg in sys.argv)
     is_child_process = is_child_process or any('spawn' in arg for arg in sys.argv)
     is_child_process = is_child_process or any('pipe_handle' in arg for arg in sys.argv)
@@ -234,7 +226,7 @@ def main(args=None):
         parser.add_argument('min_slice', nargs='?', type=float, default=default_min_slice, help='最小切片时长秒数')
         parser.add_argument('max_slice', nargs='?', type=float, default=default_max_slice, help='最大切片时长秒数')
         parser.add_argument('--encoder', type=str, default=default_encoder, 
-                           choices=['hevc_nvenc', 'libx265', 'hevc_qsv'],
+                           choices=['hevc_nvenc', 'h264_nvenc', 'libx265', 'libx264', 'hevc_qsv', 'h264_qsv'],
                            help='视频编码器')
         parser.add_argument('--preset', type=str, default=default_preset, help='编码预设')
         parser.add_argument('--quality', type=int, default=default_quality, help='质量参数(CQ/CRF)')
@@ -281,13 +273,13 @@ def main(args=None):
                            args.transition, args.transition_duration)
     except KeyboardInterrupt:
         logger.info("用户中断操作")
-        cleanup.cleanup_all()
+        cleanup.cleanup_cache()
         sys.exit(0)
     except Exception as e:
         error_msg = f"程序运行出错: {e}"
         logger.error(error_msg)
         logger.error(traceback.format_exc())
-        cleanup.cleanup_all()
+        cleanup.cleanup_cache()
         sys.exit(1)
 
 if __name__ == "__main__":

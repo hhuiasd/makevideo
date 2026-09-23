@@ -1,6 +1,6 @@
 import os
 import random
-from utils import CACHE_DIR, FFMPEG_PATH, run_ffmpeg_command, get_logger
+from utils import FFMPEG_PATH, run_ffmpeg_command, get_logger
 
 TRANSITIONS = [
     'fade', 'wipeleft', 'wiperight', 'wipeup', 'wipedown',
@@ -31,116 +31,126 @@ def validate_slices(slices):
     return valid_slices
 
 # ==============================================
-# 【关键】完全跳过标准化，不做任何预处理编码
+# 所有操作 一步 完成，只编码一次
+# 切片 → xfade转场(+锐化) → 音频 → 编码 → 输出
+# 无中间 temp 文件、无双重编码
 # ==============================================
-def normalize_slices(slices):
-    logger = get_logger()
-    logger.info("✅ 无损模式：跳过标准化，不压缩、不编码")
-    return slices
-
-def merge_videos_with_transitions(slices, output_path, transition=True, transition_duration=0.6, resolution=None):
-    if resolution is None:
-        from utils import encoder_config
-        resolution = encoder_config['resolution']
-
-    logger = get_logger()
-    valid_slices = validate_slices(slices)
-    if not valid_slices:
-        logger.error("无有效切片")
-        return False
-
-    # 直接使用原始切片，不经过任何编码
-    final_slices = valid_slices
-
-    if len(final_slices) == 1:
-        import shutil
-        shutil.copy2(final_slices[0], output_path)
-        return True
-
-    if transition:
-        success = merge_with_xfade_filter(final_slices, output_path, transition_duration, resolution)
-    else:
-        success = merge_videos_simple(final_slices, output_path)
-
-    return success
-
-# ==============================================
-# 【终极正确】所有操作 一步 完成，只编码一次
-# 缩放 + 裁剪 + 帧率 + 转场 → 全部一次搞定
-# 完全无二次压缩！
-# ==============================================
-def merge_with_xfade_filter(slices, output_path, transition_duration=0.8, resolution=None):
+def merge_all_in_one(slices, mp3_path, mp3_duration, output_path,
+                     transition=True, transition_duration=0.6, resolution=None,
+                     sharpen=False, sharpen_params='5:5:0.6',
+                     encoder='hevc_nvenc', encoder_params=None):
     if resolution is None:
         from utils import encoder_config
         resolution = encoder_config['resolution']
     logger = get_logger()
     from utils import get_media_duration
-    durations = [get_media_duration(s) for s in slices]
+
+    valid_slices = validate_slices(slices)
+    if not valid_slices:
+        logger.error("无有效切片")
+        return False
+
+    if not os.path.exists(mp3_path):
+        logger.error(f"MP3文件不存在: {mp3_path}")
+        return False
+
     width, height = resolution.split('x')
+    fade_start = max(0, mp3_duration - 2)
+    audio_index = len(valid_slices)  # 音频在切片之后
 
-    filter_complex = []
-    current_offset = 0
+    # ========== 构建 filter_complex ==========
+    filter_parts = []
+    out_label = None
 
-    for i in range(len(slices)-1):
-        trans = random.choice(TRANSITIONS)
-        dur = durations[i]
-        next_dur = durations[i+1]
-        actual_trans = min(transition_duration, dur*0.3, next_dur*0.3)
-        actual_trans = max(0.3, actual_trans)
-        offset = current_offset + dur - actual_trans
-
-        if i == 0:
-            # 第一个片段：缩放 + 帧率
-            filter_complex.append(f"[{i}:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps=30,format=yuv420p[v{i}];")
-            # 第二个片段：缩放 + 帧率
-            filter_complex.append(f"[{i+1}:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps=30,format=yuv420p[v{i+1}];")
-            # 转场
-            filter_complex.append(f"[v{i}][v{i+1}]xfade=transition={trans}:duration={actual_trans}:offset={offset}[o{i+1}];")
+    if len(valid_slices) == 1 or not transition:
+        # --- 路径 B/C：无转场 ---
+        # 每个切片: scale+crop+fps+强制方形像素(setsar=1)+format
+        for i in range(len(valid_slices)):
+            filter_parts.append(
+                f"[{i}:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+                f"crop={width}:{height},fps=30,setsar=1,format=yuv420p[v{i}];"
+            )
+        if len(valid_slices) == 1:
+            # 单切片，跳过 concat，直接到 sharpen
+            out_label = "[v0]"
         else:
-            # 后续片段只需要处理新进来的片段
-            filter_complex.append(f"[{i+1}:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps=30,format=yuv420p[v{i+1}];")
-            filter_complex.append(f"[o{i}][v{i+1}]xfade=transition={trans}:duration={actual_trans}:offset={offset}[o{i+1}];")
+            # 多切片 concat
+            concat_inputs = "".join(f"[v{i}]" for i in range(len(valid_slices)))
+            filter_parts.append(f"{concat_inputs}concat=n={len(valid_slices)}:v=1:a=0[cc];")
+            out_label = "[cc]"
+    else:
+        # --- 路径 A：xfade 转场（复用现有逻辑） ---
+        durations = [get_media_duration(s) for s in valid_slices]
+        current_offset = 0
 
-        current_offset = offset
+        for i in range(len(valid_slices) - 1):
+            trans = random.choice(TRANSITIONS)
+            dur = durations[i]
+            next_dur = durations[i + 1]
+            actual_trans = min(transition_duration, dur * 0.3, next_dur * 0.3)
+            actual_trans = max(0.3, actual_trans)
+            offset = current_offset + dur - actual_trans
 
-    # 拼接滤镜
-    final_filter = "".join(filter_complex).rstrip(";")
-    out_label = f"[o{len(slices)-1}]"
+            if i == 0:
+                filter_parts.append(
+                    f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+                    f"crop={width}:{height},fps=30,setsar=1,format=yuv420p[v0];"
+                )
+                filter_parts.append(
+                    f"[1:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+                    f"crop={width}:{height},fps=30,setsar=1,format=yuv420p[v1];"
+                )
+                filter_parts.append(
+                    f"[v0][v1]xfade=transition={trans}:duration={actual_trans}:offset={offset}[o1];"
+                )
+            else:
+                filter_parts.append(
+                    f"[{i+1}:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+                    f"crop={width}:{height},fps=30,setsar=1,format=yuv420p[v{i+1}];"
+                )
+                filter_parts.append(
+                    f"[o{i}][v{i+1}]xfade=transition={trans}:duration={actual_trans}:offset={offset}[o{i+1}];"
+                )
+            current_offset = offset
 
+        out_label = f"[o{len(valid_slices) - 1}]"
+
+    # ========== 锐化（嵌入 filter_complex） ==========
+    if sharpen:
+        filter_parts.append(f"{out_label}unsharp={sharpen_params}[outv];")
+        out_label = "[outv]"
+
+    final_filter = "".join(filter_parts).rstrip(";")
+
+    # ========== 构建 FFmpeg 命令 ==========
     cmd = [FFMPEG_PATH, '-y']
-    for s in slices:
+    for s in valid_slices:
         cmd.extend(['-i', s])
+    cmd.extend(['-i', mp3_path])
+
+    cmd.extend(['-filter_complex', final_filter])
+    cmd.extend(['-map', out_label, '-map', f'{audio_index}:a'])
+
+    cmd.extend(['-c:v', encoder])
+    if encoder_params:
+        cmd.extend(encoder_params)
 
     cmd.extend([
-        '-filter_complex', final_filter,
-        '-map', out_label,
-        '-c:v', 'libx264',
-        '-preset', 'ultrafast',
-        '-crf', '10',       # 极高画质，几乎无损
-        '-an',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-t', str(mp3_duration),
+        '-af', f'afade=t=out:st={fade_start}:d=2',
+        '-max_interleave_delta', '100M',
+        '-async', '1',
+        '-vsync', '1',
         '-y',
         output_path
     ])
 
-    return run_ffmpeg_command(cmd, "✅ 合并转场【仅编码一次 | 无二次压缩】")
+    success = run_ffmpeg_command(cmd, "✅ 一步编码【合并+转场+音频+编码 | 只编码一次】")
 
-def merge_videos_simple(slices, output_path):
-    logger = get_logger()
-    concat = os.path.join(CACHE_DIR, 'concat.txt')
-    with open(concat, 'w', encoding='utf-8') as f:
-        for s in slices:
-            f.write(f"file '{os.path.abspath(s)}'\n")
+    if success and os.path.exists(output_path):
+        output_size = os.path.getsize(output_path)
+        logger.info(f"输出文件大小: {output_size / (1024*1024):.2f} MB")
 
-    cmd = [
-        FFMPEG_PATH, '-f', 'concat', '-safe', '0', '-i', concat,
-        '-c:v', 'copy',
-        '-an',
-        '-y', output_path
-    ]
-
-    res = run_ffmpeg_command(cmd, "简单合并")
-    os.remove(concat)
-    return res
-
-def cleanup_normalized_slices(slices):
-    pass
+    return success

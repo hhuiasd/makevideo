@@ -139,11 +139,31 @@ def get_video_encoder():
             '-preset', preset,
             '-cq', str(quality),
             '-g', str(gop),
+            '-tune', 'hq',
+            '-spatial-aq', '1',
+            '-temporal-aq', '1',
+            '-rc-lookahead', '32',
+            '-bf', '4',
+            '-b_ref_mode', 'middle',
             '-pix_fmt', 'yuv420p',
             '-profile:v', 'main',
             '-movflags', '+faststart'
         ]
-    elif encoder == 'libx265':
+    elif encoder == 'h264_nvenc':
+        return encoder, [
+            '-preset', preset,
+            '-cq', str(quality),
+            '-g', str(gop),
+            '-tune', 'hq',
+            '-spatial-aq', '1',
+            '-temporal-aq', '1',
+            '-rc-lookahead', '32',
+            '-bf', '3',
+            '-pix_fmt', 'yuv420p',
+            '-profile:v', 'main',
+            '-movflags', '+faststart'
+        ]
+    elif encoder == 'libx265' or encoder == 'libx264':
         return encoder, [
             '-preset', preset,
             '-crf', str(quality),
@@ -152,7 +172,7 @@ def get_video_encoder():
             '-profile:v', 'main',
             '-movflags', '+faststart'
         ]
-    elif encoder == 'hevc_qsv':
+    elif encoder == 'hevc_qsv' or encoder == 'h264_qsv':
         return encoder, [
             '-preset', preset,
             '-global_quality', str(quality),
@@ -290,34 +310,6 @@ def get_media_duration(file_path):
         return duration
     except Exception:
         return 0
-
-def get_video_info(file_path):
-    cmd = [
-        FFPROBE_PATH,
-        '-v', 'quiet',
-        '-print_format', 'json',
-        '-show_format',
-        '-show_streams',
-        file_path
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
-    if result.returncode != 0:
-        return None
-    
-    try:
-        data = json.loads(result.stdout)
-        video_stream = next((s for s in data['streams'] if s['codec_type'] == 'video'), None)
-        audio_stream = next((s for s in data['streams'] if s['codec_type'] == 'audio'), None)
-        
-        return {
-            'duration': float(data['format']['duration']),
-            'width': int(video_stream['width']) if video_stream else None,
-            'height': int(video_stream['height']) if video_stream else None,
-            'fps': eval(video_stream['r_frame_rate']) if video_stream else None,
-            'has_audio': audio_stream is not None
-        }
-    except Exception:
-        return None
 
 def run_ffmpeg_command(cmd, description="FFmpeg命令"):
     logger = get_logger()

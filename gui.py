@@ -64,7 +64,7 @@ class VideoMixGUI:
         ttk.Label(encoder_frame, text="编码器:").grid(row=0, column=0, sticky=tk.W, pady=2)
         self.encoder_var = tk.StringVar()
         self.encoder_combo = ttk.Combobox(encoder_frame, textvariable=self.encoder_var, 
-                                          values=["hevc_nvenc", "libx265", "hevc_qsv"], 
+                                          values=["hevc_nvenc", "h264_nvenc", "libx265", "libx264", "hevc_qsv", "h264_qsv"], 
                                           state="readonly", width=15)
         self.encoder_combo.grid(row=0, column=1, sticky=tk.W, pady=2, padx=5)
         self.encoder_combo.bind("<<ComboboxSelected>>", self.on_encoder_change)
@@ -252,13 +252,13 @@ class VideoMixGUI:
         
     def on_encoder_change(self, event):
         encoder = self.encoder_var.get()
-        if encoder == "hevc_nvenc":
+        if encoder == "hevc_nvenc" or encoder == "h264_nvenc":
             self.preset_combo['values'] = ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]
             self.preset_var.set("p7")
-        elif encoder == "libx265":
+        elif encoder == "libx265" or encoder == "libx264":
             self.preset_combo['values'] = ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]
             self.preset_var.set("slow")
-        elif encoder == "hevc_qsv":
+        elif encoder == "hevc_qsv" or encoder == "h264_qsv":
             self.preset_combo['values'] = ["veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]
             self.preset_var.set("slow")
         
@@ -520,7 +520,7 @@ class VideoMixGUI:
             import tempfile
             
             # 首先检查内存缓存目录
-            memory_cache_dir = os.path.join('\\.\pipe', 'makevideo_cache')
+            memory_cache_dir = os.path.join(r'\\.\pipe', 'makevideo_cache')
             if os.path.exists(memory_cache_dir):
                 import shutil
                 shutil.rmtree(memory_cache_dir)
